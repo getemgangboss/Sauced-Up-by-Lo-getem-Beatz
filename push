@@ -1,0 +1,57 @@
+#pragma once
+
+#include <JuceHeader.h>
+
+class SynthVoice : public juce::SynthesiserVoice
+{
+public:
+    bool canPlaySound(juce::SynthesiserSound* sound) override;
+    void startNote(int midiNoteNumber, float velocity, juce::SynthesiserSound*, int) override;
+    void stopNote(float, bool allowTailOff) override;
+    void pitchWheelMoved(int) override {}
+    void controllerMoved(int, int) override {}
+    void renderNextBlock(juce::AudioBuffer<float>&, int, int) override;
+    void setEnvelope(float attack, float decay, float sustain, float release);
+
+private:
+    double currentAngle = 0, angleDelta = 0, level = 0;
+    juce::ADSR adsr;
+};
+
+class SynthSound : public juce::SynthesiserSound
+{
+public:
+    bool appliesToNote(int) override { return true; }
+    bool appliesToChannel(int) override { return true; }
+};
+
+class SauceUpSynthAudioProcessor : public juce::AudioProcessor
+{
+public:
+    SauceUpSynthAudioProcessor();
+    ~SauceUpSynthAudioProcessor() override = default;
+    void prepareToPlay(double sampleRate, int samplesPerBlock) override;
+    void releaseResources() override {}
+    void processBlock(juce::AudioBuffer<float>&, juce::MidiBuffer&) override;
+    juce::AudioProcessorEditor* createEditor() override;
+    bool hasEditor() const override { return true; }
+    const juce::String getName() const override { return "Sauced-Up Synth"; }
+    bool acceptsMidi() const override { return true; }
+    bool producesMidi() const override { return false; }
+    double getTailLengthSeconds() const override { return 0.0; }
+    int getNumPrograms() override { return 1; }
+    int getCurrentProgram() override { return 0; }
+    void setCurrentProgram(int) override {}
+    const juce::String getProgramName(int) override { return {}; }
+    void changeProgramName(int, const juce::String&) override {}
+    void getStateInformation(juce::MemoryBlock& destData) override;
+    void setStateInformation(const void* data, int sizeInBytes) override;
+    void savePreset(const juce::File& file);
+    void loadPreset(const juce::File& file);
+    juce::AudioProcessorValueTreeState parameters;
+
+private:
+    juce::Synthesiser synth;
+    juce::dsp::Reverb reverb;
+    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(SauceUpSynthAudioProcessor)
+};
