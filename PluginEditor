@@ -1,0 +1,16 @@
+#pragma once
+#include <JuceHeader.h>
+
+class PluginEditor : public juce::AudioProcessorEditor
+{
+public:
+    PluginEditor(juce::AudioProcessor& p, juce::AudioProcessorValueTreeState& params);
+    ~PluginEditor() override = default;
+    void paint(juce::Graphics&) override;
+    void resized() override;
+
+private:
+    juce::Slider attackSlider, decaySlider, sustainSlider, releaseSlider, reverbSlider;
+    juce::Label attackLabel, decayLabel, sustainLabel, releaseLabel, reverbLabel;
+    std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> attackAttachment, decayAttachment, sustainAttachment, releaseAttachment, reverbAttachment;
+};
