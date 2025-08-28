@@ -1,0 +1,130 @@
+#include "PluginProcessor.h"
+#include "PluginEditor.h"
+
+SauceUpSynthAudioProcessor::SauceUpSynthAudioProcessor()
+    : AudioProcessor(BusesProperties().withOutput("Output", juce::AudioChannelSet::stereo(), true)),
+      parameters(*this, nullptr, "PARAMETERS", {
+          std::make_unique<juce::AudioParameterFloat>("attack", "Attack", 0.01f, 2.0f, 0.1f),
+          std::make_unique<juce::AudioParameterFloat>("decay", "Decay", 0.01f, 2.0f, 0.2f),
+          std::make_unique<juce::AudioParameterFloat>("sustain", "Sustain", 0.0f, 1.0f, 0.8f),
+          std::make_unique<juce::AudioParameterFloat>("release", "Release", 0.01f, 3.0f, 0.5f),
+          std::make_unique<juce::AudioParameterFloat>("reverbRoom", "Reverb Room Size", 0.0f, 1.0f, 0.5f)
+      })
+{
+    synth.clearVoices();
+    for (int i = 0; i < 8; ++i)
+        synth.addVoice(new SynthVoice());
+    synth.clearSounds();
+    synth.addSound(new SynthSound());
+}
+
+void SauceUpSynthAudioProcessor::prepareToPlay(double sampleRate, int)
+{
+    synth.setCurrentPlaybackSampleRate(sampleRate);
+    juce::dsp::Reverb::Parameters params;
+    params.roomSize = parameters.getRawParameterValue("reverbRoom")->load();
+    params.wetLevel = 0.3f;
+    reverb.setParameters(params);
+}
+
+void SauceUpSynthAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::MidiBuffer& midiMessages)
+{
+    buffer.clear();
+    for (int i = 0; i < synth.getNumVoices(); ++i)
+    {
+        if (auto* v = dynamic_cast<SynthVoice*>(synth.getVoice(i)))
+        {
+            v->setEnvelope(
+                parameters.getRawParameterValue("attack")->load(),
+                parameters.getRawParameterValue("decay")->load(),
+                parameters.getRawParameterValue("sustain")->load(),
+                parameters.getRawParameterValue("release")->load()
+            );
+        }
+    }
+    synth.renderNextBlock(buffer, midiMessages, 0, buffer.getNumSamples());
+    juce::dsp::AudioBlock<float> audioBlock(buffer);
+    reverb.process(juce::dsp::ProcessContextReplacing<float>(audioBlock));
+}
+
+juce::AudioProcessorEditor* SauceUpSynthAudioProcessor::createEditor()
+{
+    return new PluginEditor(*this, parameters);
+}
+
+void SauceUpSynthAudioProcessor::getStateInformation(juce::MemoryBlock& destData)
+{
+    auto state = parameters.copyState();
+    std::unique_ptr<juce::XmlElement> xml(state.createXml());
+    copyXmlToBinary(*xml, destData);
+}
+
+void SauceUpSynthAudioProcessor::setStateInformation(const void* data, int sizeInBytes)
+{
+    std::unique_ptr<juce::XmlElement> xmlState(getXmlFromBinary(data, sizeInBytes));
+    if (xmlState)
+        parameters.replaceState(juce::ValueTree::fromXml(*xmlState));
+}
+
+void SauceUpSynthAudioProcessor::savePreset(const juce::File& file)
+{
+    auto state = parameters.copyState();
+    std::unique_ptr<juce::XmlElement> xml(state.createXml());
+    xml->writeToFile(file, {});
+}
+
+void SauceUpSynthAudioProcessor::loadPreset(const juce::File& file)
+{
+    std::unique_ptr<juce::XmlElement> xml(juce::XmlDocument::parse(file));
+    parameters.replaceState(juce::ValueTree::fromXml(*xml));
+}
+
+// SynthVoice implementation
+bool SynthVoice::canPlaySound(juce::SynthesiserSound* sound)
+{
+    return dynamic_cast<SynthSound*>(sound) != nullptr;
+}
+
+void SynthVoice::startNote(int midiNoteNumber, float velocity, juce::SynthesiserSound*, int)
+{
+    currentAngle = 0.0;
+    level = velocity;
+    angleDelta = juce::MathConstants<double>::twoPi * juce::MidiMessage::getMidiNoteInHertz(midiNoteNumber) / getSampleRate();
+    adsr.noteOn();
+}
+
+void SynthVoice::stopNote(float, bool allowTailOff)
+{
+    if (allowTailOff)
+        adsr.noteOff();
+    else
+        clearCurrentNote();
+}
+
+void SynthVoice::renderNextBlock(juce::AudioBuffer<float>& outputBuffer, int startSample, int numSamples)
+{
+    if (angleDelta != 0)
+    {
+        adsr.setSampleRate(getSampleRate());
+        for (int sample = 0; sample < numSamples; ++sample)
+        {
+            float env = adsr.getNextSample();
+            float value = (float)(std::sin(currentAngle) * level * env);
+            for (int channel = 0; channel < outputBuffer.getNumChannels(); ++channel)
+                outputBuffer.addSample(channel, startSample + sample, value);
+            currentAngle += angleDelta;
+        }
+        if (!adsr.isActive())
+            clearCurrentNote();
+    }
+}
+
+void SynthVoice::setEnvelope(float attack, float decay, float sustain, float release)
+{
+    juce::ADSR::Parameters params;
+    params.attack = attack;
+    params.decay = decay;
+    params.sustain = sustain;
+    params.release = release;
+    adsr.setParameters(params);
+}
